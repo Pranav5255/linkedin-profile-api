@@ -1,0 +1,37 @@
+.env
+.env.*
+!.env.example
+
+*.db
+*.db-wal
+*.db-shm
+data/
+!data/.gitkeep
+
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+.DS_Store
+
+# Caddy runtime
+caddy_data/
+caddy_config/
+deploy/caddy_data/
+deploy/caddy_config/
+
+# Capture artifacts (contain cookies and CSRF)
+*.har
+captures/
+src/linkedin_profile_api/linkedin/_generated_endpoints.json
+data/captured-endpoints.json
+data/*.har
