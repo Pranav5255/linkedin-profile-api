@@ -11,6 +11,8 @@ REPO_URL="${REPO_URL:-https://github.com/Pranav5255/linkedin-profile-api.git}"
 SITE_NAME="${SITE_NAME:-linkedin-duckdns}"
 OPS_DIR="${OPS_DIR:-${HOME}/.local/share/linkedin-profile-api}"
 COMPOSE_FILE="compose.vm.yaml"
+HEALTH_TIMEOUT_SECONDS="${HEALTH_TIMEOUT_SECONDS:-90}"
+HEALTH_POLL_SECONDS="${HEALTH_POLL_SECONDS:-2}"
 
 die() {
   echo "error: $*" >&2
@@ -19,6 +21,25 @@ die() {
 
 need() {
   command -v "$1" >/dev/null 2>&1 || die "missing command: $1"
+}
+
+wait_for_health() {
+  local url="$1"
+  local deadline started now
+  started="$(date +%s)"
+  deadline=$((started + HEALTH_TIMEOUT_SECONDS))
+  echo "waiting up to ${HEALTH_TIMEOUT_SECONDS}s for ${url}"
+  while true; do
+    if curl -fsS --max-time 5 "${url}" >/dev/null 2>&1; then
+      echo "API is healthy"
+      return 0
+    fi
+    now="$(date +%s)"
+    if (( now >= deadline )); then
+      die "API did not become healthy on ${url} within ${HEALTH_TIMEOUT_SECONDS}s"
+    fi
+    sleep "${HEALTH_POLL_SECONDS}"
+  done
 }
 
 detect_repo_root() {
@@ -138,8 +159,7 @@ main() {
   ensure_env_file "${repo}"
 
   (cd "${repo}" && docker compose -f "${COMPOSE_FILE}" up -d --build)
-  curl -fsS --max-time 20 "http://127.0.0.1:8080/healthz" >/dev/null \
-    || die "API did not become healthy on 127.0.0.1:8080"
+  wait_for_health "http://127.0.0.1:8080/healthz"
 
   install_nginx_site "${repo}"
   request_cert

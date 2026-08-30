@@ -4,9 +4,9 @@ from contextlib import asynccontextmanager
 from uuid import uuid4
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
 
 from linkedin_profile_api.api.errors import install_exception_handlers
+from linkedin_profile_api.api.json_response import PrettyJSONResponse
 from linkedin_profile_api.api.routes import router
 from linkedin_profile_api.cache.sqlite import CacheStore
 from linkedin_profile_api.config import get_settings
@@ -55,6 +55,7 @@ def create_app() -> FastAPI:
         title="LinkedIn Profile API",
         version="0.1.0",
         description="Resolve a LinkedIn profile URL to structured JSON via reverse-engineered Voyager HTTP endpoints.",
+        default_response_class=PrettyJSONResponse,
         lifespan=lifespan,
     )
     install_exception_handlers(app)
@@ -67,7 +68,7 @@ def create_app() -> FastAPI:
             body = await request.body()
             settings = get_settings()
             if len(body) > settings.max_request_body_bytes:
-                return JSONResponse(
+                return PrettyJSONResponse(
                     status_code=422,
                     content={
                         "error": {
