@@ -1,13 +1,48 @@
 # LinkedIn Profile API
 
+Anybody can set the API key they will use by opening [https://pranav-linkedin-api-tross.duckdns.org/docs](https://pranav-linkedin-api-tross.duckdns.org/docs), clicking **Authorize**, pasting `X-API-Key`, then **Authorize** → **Close**. Swagger keeps that value for **Try it out** on this browser. Use the current hosted key (the one you were sent, or a new one after the host rotates it). Change what you paste anytime; you do not need to edit this README.
+
 Public HTTPS API that accepts a LinkedIn `/in/{slug}` profile URL and returns indented JSON. The backend talks to LinkedIn Voyager / GraphQL over HTTP with a browser-like TLS fingerprint. There is no browser, Playwright, Selenium, or Puppeteer in this project.
 
 Source: https://github.com/Pranav5255/linkedin-profile-api
 
 Live: https://pranav-linkedin-api-tross.duckdns.org  
-Open `/docs`, click **Authorize**, paste `X-API-Key`, then **Authorize** → **Close**. The key is sent privately, not in this file.
+Docs: https://pranav-linkedin-api-tross.duckdns.org/docs
 
-This is a take-home implementation. LinkedIn’s User Agreement prohibits scraping, unauthorized automation, and reverse engineering. Using a personal `li_at` session can get the account restricted. Do not use a primary career account.
+### This is a take-home implementation. LinkedIn’s User Agreement prohibits scraping, unauthorized automation, and reverse engineering. Using a personal `li_at` session can get the account restricted. Do not use a primary career account.
+
+## Use the hosted API
+
+Copy and paste the commands. The only value a first-time caller must set is `PROFILE_URL` (a LinkedIn `/in/{slug}`). Put your current API key in `API_KEY` — use the key you were sent, or any new key after the host rotates it.
+
+`API_KEY` is not a LinkedIn secret. Anyone with the current host key can use it. The operator can change the host key to any string at any time; callers then send that new value as `X-API-Key`. The key is not in this file.
+
+Interactive: open `/docs` → **Authorize** → paste your key → **Authorize** → **Close** → try `POST /v1/profiles`.
+
+```bash
+API_KEY='your-api-key'
+PROFILE_URL='https://www.linkedin.com/in/YOUR-SLUG/'
+curl -sS -X POST https://pranav-linkedin-api-tross.duckdns.org/v1/profiles \
+  -H "X-API-Key: ${API_KEY}" \
+  -H "Content-Type: application/json" \
+  --data-raw "{\"profile_url\":\"${PROFILE_URL}\"}"
+```
+
+```bash
+API_KEY='your-api-key'
+PROFILE_URL='https://www.linkedin.com/in/YOUR-SLUG/'
+curl -sS -G https://pranav-linkedin-api-tross.duckdns.org/v1/profiles \
+  -H "X-API-Key: ${API_KEY}" \
+  --data-urlencode "url=${PROFILE_URL}"
+```
+
+```bash
+curl -sS https://pranav-linkedin-api-tross.duckdns.org/healthz
+```
+
+Use a 1st- or 2nd-degree connection of the session that will fetch it. A random public URL often returns `visibility: out_of_network`.
+
+To rotate the hosted key, set `API_KEY` in the host `.env` to any string, recreate the API container, and use the new value in Authorize / `X-API-Key`. No other command changes.
 
 ## Architecture
 
@@ -75,39 +110,14 @@ Section states: `available` | `empty` | `inaccessible` | `upstream_changed` | `f
 
 `"LinkedIn Member"` is treated as `out_of_network` / `inaccessible`, never as a blank successful parse.
 
-## Local Python install
-
-Requires Python 3.12+.
-
-```bash
-python3.12 -m venv .venv
-source .venv/bin/activate
-pip install .
-cp .env.example .env
-# fill API_KEY and LINKEDIN_COOKIE_JAR (or LI_AT + JSESSIONID)
-linkedin-profile-api serve --host 127.0.0.1 --port 8000
-```
-
-Open `http://127.0.0.1:8000/docs` → **Authorize** → paste the key → **Authorize** → **Close**.
-
-## Local Docker install
-
-```bash
-cp .env.example .env
-# fill API_KEY and LINKEDIN_COOKIE_JAR
-docker compose up --build api
-```
-
-That starts only the API on `http://127.0.0.1:8000`. `docker compose up --build` (no service name) also starts Caddy on 80/443. Pass `DUCKDNS_HOSTNAME` in `.env` so the Caddy container sees it.
-
 ## Environment variables
 
 See `.env.example`. All values are empty placeholders in git.
 
 | Variable | Purpose |
 |---|---|
-| `API_KEY` | Evaluator key (private). |
-| `DEMO_API_KEY` | Optional low-quota key (5 req/hour). |
+| `API_KEY` | Any string you choose. Required for `/v1/profiles`. Change it in `.env` and restart. |
+| `DEMO_API_KEY` | Optional second key (5 req/hour). |
 | `LINKEDIN_COOKIE_JAR` | Full Cookie header from a logged-in browser. Preferred. |
 | `LINKEDIN_LI_AT` / `LINKEDIN_JSESSIONID` | Optional overrides if you are not pasting the full jar. |
 | `LINKEDIN_COOKIE_JAR_FAILOVER` | Optional second aged session (full jar). |
@@ -128,47 +138,46 @@ Never put cookies or keys in the README, image, or git history.
 
 ## API
 
-All profile routes require `X-API-Key`. Responses are indented JSON.
+All profile routes require `X-API-Key`. Set it to whatever the current hosted key is. Responses are indented JSON.
 
-Hosted callers can send their own LinkedIn session instead of using the server jar. Prefer the header. Do not put cookies on the query string.
+Callers can send their own LinkedIn session instead of the host jar. Prefer the header. Do not put cookies on the query string.
 
-```http
-POST /v1/profiles
-X-API-Key: <key>
-X-LinkedIn-Cookie: li_at=...; JSESSIONID=ajax:...; bcookie=...; lidc=...; _px3=...
-Content-Type: application/json
-
-{"profile_url":"https://www.linkedin.com/in/example-profile/"}
+```bash
+API_KEY='your-api-key'
+PROFILE_URL='https://www.linkedin.com/in/YOUR-SLUG/'
+LINKEDIN_COOKIE='li_at=...; JSESSIONID=ajax:...'
+curl -sS -X POST https://pranav-linkedin-api-tross.duckdns.org/v1/profiles \
+  -H "X-API-Key: ${API_KEY}" \
+  -H "X-LinkedIn-Cookie: ${LINKEDIN_COOKIE}" \
+  -H "Content-Type: application/json" \
+  --data-raw "{\"profile_url\":\"${PROFILE_URL}\"}"
 ```
 
 `X-LinkedIn-Cookie` must be the full Cookie header from a logged-in browser (same shape as `LINKEDIN_COOKIE_JAR`). `li_at` and `JSESSIONID` are required. A leading `Cookie:` prefix is stripped. The value is used for that request only: it is not written to disk, not logged, and not stored in the profile cache. Failed caller cookies do not fail over the host session.
 
 POST can send the same string in JSON instead of the header:
 
-```http
-POST /v1/profiles
-X-API-Key: <key>
-Content-Type: application/json
-
-{"profile_url":"https://www.linkedin.com/in/example-profile/","linkedin_cookie":"li_at=...; JSESSIONID=ajax:..."}
+```bash
+API_KEY='your-api-key'
+PROFILE_URL='https://www.linkedin.com/in/YOUR-SLUG/'
+LINKEDIN_COOKIE='li_at=...; JSESSIONID=ajax:...'
+curl -sS -X POST https://pranav-linkedin-api-tross.duckdns.org/v1/profiles \
+  -H "X-API-Key: ${API_KEY}" \
+  -H "Content-Type: application/json" \
+  --data-raw "{\"profile_url\":\"${PROFILE_URL}\",\"linkedin_cookie\":\"${LINKEDIN_COOKIE}\"}"
 ```
 
 If both are present, the header wins. Omit both to use the host `LINKEDIN_COOKIE_JAR`.
 
-```http
-GET /v1/profiles?url=https://www.linkedin.com/in/example-profile/
-X-API-Key: <key>
-X-LinkedIn-Cookie: li_at=...; JSESSIONID=ajax:...
-```
-
 Accepted URLs: `https://linkedin.com/in/{slug}` and `https://www.linkedin.com/in/{slug}` only. Query and fragment are stripped. The service never fetches the user-supplied URL.
 
-```http
-GET /healthz    # process alive; never calls LinkedIn
-GET /readyz     # host cookies + cache; live `/voyager/api/me` at most once per SESSION_PROBE_INTERVAL_SECONDS
-GET /docs
-GET /openapi.json
+```bash
+curl -sS https://pranav-linkedin-api-tross.duckdns.org/healthz
+curl -sS https://pranav-linkedin-api-tross.duckdns.org/readyz
+curl -sS https://pranav-linkedin-api-tross.duckdns.org/openapi.json
 ```
+
+`GET /healthz` is process-alive and never calls LinkedIn. `GET /readyz` may call `/voyager/api/me` at most once per `SESSION_PROBE_INTERVAL_SECONDS`. Docs: https://pranav-linkedin-api-tross.duckdns.org/docs
 
 ### Errors
 
@@ -306,4 +315,4 @@ https://pranav-linkedin-api-tross.duckdns.org/docs
 
 ## Secrets
 
-`.env`, `*.har`, and `data/captured-endpoints.json` are gitignored. Send the evaluator `X-API-Key` privately — not in this README.
+`.env`, `*.har`, and `data/captured-endpoints.json` are gitignored. You choose `API_KEY`; do not commit it. The hosted evaluator key is sent privately — not in this README.
