@@ -1,26 +1,68 @@
 # LinkedIn Profile API
 
-Hosted HTTPS API that accepts a LinkedIn `/in/{slug}` profile URL and returns structured JSON. The backend talks to LinkedIn Voyager / GraphQL HTTP endpoints with a browser-like TLS fingerprint. There is no browser, Playwright, Selenium, or Puppeteer in this project.
+Public HTTPS API that accepts a LinkedIn `/in/{slug}` profile URL and returns indented JSON. The backend talks to LinkedIn Voyager / GraphQL over HTTP with a browser-like TLS fingerprint. There is no browser, Playwright, Selenium, or Puppeteer in this project.
 
-This is a take-home assignment implementation. LinkedIn’s User Agreement prohibits scraping, unauthorized automation, and reverse engineering. Using a personal `li_at` session can get the account restricted. Do not use a primary career account.
+Source: https://github.com/Pranav5255/linkedin-profile-api
+
+Live: https://pranav-linkedin-api-tross.duckdns.org  
+Open `/docs`, click **Authorize**, paste `X-API-Key`, then **Authorize** → **Close**. The key is sent privately, not in this file.
+
+This is a take-home implementation. LinkedIn’s User Agreement prohibits scraping, unauthorized automation, and reverse engineering. Using a personal `li_at` session can get the account restricted. Do not use a primary career account.
 
 ## Architecture
 
-```text
-Client --HTTPS:443--> Caddy --> FastAPI :8000
-                                ├── curl_cffi AsyncSession (impersonate=chrome124)
-                                ├── URL → slug → URN resolver
-                                ├── queryId / decorationId discovery
-                                ├── Normalized JSON URN resolver
-                                ├── Visibility / redaction detector
-                                └── SQLite TTL cache
+The hosted instance shares 80/443 with another site. nginx terminates TLS and proxies to the API on loopback. The API never fetches the caller’s URL as-is: it parses an `/in/{slug}` host, then calls LinkedIn itself.
+
+```mermaid
+flowchart TB
+  client["Evaluator / curl / docs"]
+  dns["DuckDNS"]
+  ip["Public IPv4"]
+  nginx["nginx TLS :443 / :80"]
+
+  subgraph fastapi ["FastAPI  127.0.0.1:8080"]
+    auth["API key + rate limit"]
+    slug["URL to slug  SSRF allowlist"]
+    cookies["Request cookies XOR host jar"]
+    cache["SQLite WAL cache<br/>skipped if caller cookies"]
+  end
+
+  subgraph voyager ["LinkedIn HTTP client"]
+    tls["curl_cffi impersonate chrome124"]
+    jar["Cookie jar + CSRF from JSESSIONID"]
+    urn["HTML /in/slug to fsd_profile URN"]
+    identity["GET dash/profiles/urn<br/>FullProfileWithEntities-93<br/>fallback -76 then WebTopCard-16"]
+    graph["Normalized JSON URN graph"]
+    parse["Section parsers + visibility"]
+    rediscover["Optional queryId rediscovery"]
+  end
+
+  linkedin["LinkedIn Voyager / GraphQL"]
+
+  client -->|"HTTPS  X-API-Key<br/>optional X-LinkedIn-Cookie"| dns
+  dns --> ip
+  ip --> nginx
+  nginx --> auth
+  auth --> slug
+  slug --> cookies
+  cookies --> cache
+  cache --> tls
+  tls --> jar
+  jar --> urn
+  urn --> identity
+  identity --> graph
+  graph --> parse
+  parse --> rediscover
+  rediscover -->|"optional LINKEDIN_EGRESS_PROXY"| linkedin
 ```
+
+Dedicated host with 80/443 free: Caddy in `compose.yaml` terminates TLS onto FastAPI `:8000` instead of nginx `:8080`. Do not start Caddy on a host that already has nginx.
 
 Stack: Python 3.12, FastAPI, Pydantic v2, `curl_cffi==0.13.0`, SQLite WAL. TLS impersonation is necessary but not sufficient — LinkedIn also scores IP reputation, cadence, and cookies.
 
 ## Supported fields
 
-Returned when LinkedIn returns them **and** the backend session can see them:
+Returned when LinkedIn returns them **and** the session on that request can see them (host jar, or `X-LinkedIn-Cookie`):
 
 - name, headline, location, industry, about
 - profile and background images (URLs only; they expire)
@@ -46,16 +88,17 @@ cp .env.example .env
 linkedin-profile-api serve --host 127.0.0.1 --port 8000
 ```
 
-Open `http://127.0.0.1:8000/docs` and use **Authorize** with `X-API-Key`.
+Open `http://127.0.0.1:8000/docs` → **Authorize** → paste the key → **Authorize** → **Close**.
 
 ## Local Docker install
 
 ```bash
 cp .env.example .env
+# fill API_KEY and LINKEDIN_COOKIE_JAR
 docker compose up --build api
 ```
 
-The API listens on `http://127.0.0.1:8000` only. `docker compose up --build` also starts Caddy on 80/443 in front of it.
+That starts only the API on `http://127.0.0.1:8000`. `docker compose up --build` (no service name) also starts Caddy on 80/443. Pass `DUCKDNS_HOSTNAME` in `.env` so the Caddy container sees it.
 
 ## Environment variables
 
@@ -78,13 +121,14 @@ See `.env.example`. All values are empty placeholders in git.
 | `UPSTREAM_DELAY_MS_MIN` / `MAX` | Jitter between LinkedIn calls. Default 800–2000. |
 | `SESSION_PROBE_INTERVAL_SECONDS` | Min gap between `/voyager/api/me` probes from `/readyz`. Default 300. |
 | `LINKEDIN_DECOY_FEED` | After `/me`, hit `/feed/updatesV2` before the profile call. Default false. |
+| `DUCKDNS_HOSTNAME` | Public hostname for the Caddy site. Unused when nginx terminates TLS. |
 | `CAPTURED_ENDPOINTS_PATH` | Gitignored output of HAR import. |
 
 Never put cookies or keys in the README, image, or git history.
 
 ## API
 
-All profile routes require `X-API-Key`. The header is registered as an OpenAPI security scheme so `/docs` → Authorize works.
+All profile routes require `X-API-Key`. Responses are indented JSON.
 
 Hosted callers can send their own LinkedIn session instead of using the server jar. Prefer the header. Do not put cookies on the query string.
 
@@ -121,7 +165,7 @@ Accepted URLs: `https://linkedin.com/in/{slug}` and `https://www.linkedin.com/in
 
 ```http
 GET /healthz    # process alive; never calls LinkedIn
-GET /readyz     # cookies + cache; live `/voyager/api/me` at most once per SESSION_PROBE_INTERVAL_SECONDS
+GET /readyz     # host cookies + cache; live `/voyager/api/me` at most once per SESSION_PROBE_INTERVAL_SECONDS
 GET /docs
 GET /openapi.json
 ```
@@ -138,9 +182,11 @@ GET /openapi.json
 | 503 | `linkedin_session_expired` or `linkedin_blocked` (HTTP 999) |
 | 504 | `upstream_timeout` or `upstream_deadline` |
 
-Example profile URL for demos: use a 1st- or 2nd-degree profile from the backend account. A random public URL will often return `visibility: out_of_network`.
+Example profile URL: use a 1st- or 2nd-degree profile from the session that will fetch it. A random public URL will often return `visibility: out_of_network`.
 
-## Capture (required before a useful spike)
+## Capture (optional)
+
+Identity decorations are hardcoded, so a live fetch works without a HAR. Import is only needed to pin current `queryId` / header values.
 
 1. Log in to the aged LinkedIn account in a normal browser.
 2. Open DevTools → Network.
@@ -195,18 +241,20 @@ After HTTP was green, parsers were still wrong:
 
 ## Cache and cookie rotation
 
-SQLite tables: `profile_cache`, `identity_cache`, `query_registry`, `session_state`. Auth failures, challenge HTML, and HTTP 999 are not cached. Out-of-network responses may be cached briefly and are never served as `full`.
+SQLite tables: `profile_cache`, `identity_cache`, `query_registry`, `session_state`. Auth failures, challenge HTML, and HTTP 999 are not cached. Out-of-network responses may be cached briefly and are never served as `full`. Caller-cookie fetches are never written to `profile_cache`.
 
 ### Rotation runbook (~2 minutes)
 
 1. Log in to the aged account in a normal browser (same country as the egress IP).
-2. DevTools → Application → Cookies → `https://www.linkedin.com`. Copy the full Cookie header from any Voyager request in the Network tab.
+2. DevTools → Network → any Voyager request. Copy the full Cookie header.
 3. Paste it into `LINKEDIN_COOKIE_JAR`. If LinkedIn hangs or challenges from this host, also set `LINKEDIN_EGRESS_PROXY` to a sticky residential URL.
 4. Replace values in the host env file (`chmod 600`).
-5. `docker compose up -d --force-recreate api` (Caddy stays up; certs persist).
-6. Confirm `/readyz` is ready and a known 1st/2nd-degree profile returns `visibility: full`.
+5. Recreate only the API container:
+   - dedicated Caddy host: `docker compose up -d --force-recreate api`
+   - nginx host: `docker compose -f compose.vm.yaml up -d --force-recreate api`
+6. Confirm `/healthz` is ok and a known 1st/2nd-degree profile returns `visibility: full`.
 
-Failover cookies switch once per process on session death. `/readyz` then reports not ready if the last real upstream outcome was a challenge.
+Failover cookies switch once per process on host-session death. `/readyz` then reports not ready if the last real upstream outcome was a challenge. Caller cookies do not change that state.
 
 ## Security
 
@@ -226,7 +274,7 @@ If the host is dedicated to this API:
 docker compose up -d --build
 ```
 
-Caddy terminates TLS on 80/443. Set `DUCKDNS_HOSTNAME` to the public hostname.
+Caddy terminates TLS on 80/443. Set `DUCKDNS_HOSTNAME` in `.env` (the Caddy service reads it).
 
 If 80/443 are already in use, do not start Caddy. Bind the API on loopback and add a separate nginx `server_name`:
 
@@ -242,8 +290,8 @@ sudo certbot --nginx -d YOUR_DUCKDNS_HOST
 `compose.vm.yaml` publishes `127.0.0.1:8080` only. Probe `/healthz` after deploy. Do not poll `/readyz` as a keep-alive — it may call `/voyager/api/me` when the last probe is older than `SESSION_PROBE_INTERVAL_SECONDS`.
 
 ```text
-https://<hostname>/v1/profiles
-https://<hostname>/docs
+https://pranav-linkedin-api-tross.duckdns.org/v1/profiles
+https://pranav-linkedin-api-tross.duckdns.org/docs
 ```
 
 ## Known limitations
@@ -256,12 +304,6 @@ https://<hostname>/docs
 - Request deadline (360s) can return partial results with `deadline_hit: true`.
 - This project violates LinkedIn’s User Agreement if used against LinkedIn. Account risk is real.
 
-## Publication (you do this)
+## Secrets
 
-This working copy is local-only. Do not push until you have:
-
-1. Grepped the tree **and** `git log -p` for `li_at`, `JSESSIONID`, API keys, emails, passwords.
-2. Confirmed `.env.example` is placeholders and `data/captured-endpoints.json` / `*.har` are ignored.
-3. Built from a fresh local clone path (`docker compose build`).
-4. Created the GitHub repo yourself and pushed yourself.
-5. Sent the evaluator key privately — not in this README.
+`.env`, `*.har`, and `data/captured-endpoints.json` are gitignored. Send the evaluator `X-API-Key` privately — not in this README.
