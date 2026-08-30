@@ -8,6 +8,7 @@ from uuid import UUID
 from linkedin_profile_api.cache.sqlite import CacheStore
 from linkedin_profile_api.config import Settings
 from linkedin_profile_api.linkedin.client import LinkedInClient, progress
+from linkedin_profile_api.linkedin.session import CookiePair
 from linkedin_profile_api.linkedin.exceptions import (
     LinkedInProtocolChangedError,
     SectionFetchError,
@@ -83,12 +84,14 @@ class ProfileService:
         request_id: UUID,
         *,
         bypass_cache: bool = False,
+        request_cookies: CookiePair | None = None,
     ) -> ProfileResponse:
         started = datetime.now(timezone.utc)
         deadline = started + timedelta(seconds=self._settings.request_deadline_seconds)
         slug = parse_profile_url(profile_url, max_length=self._settings.max_url_length)
+        skip_cache_read = bypass_cache or request_cookies is not None
 
-        cached = None if bypass_cache else await self._cache.get_profile(slug)
+        cached = None if skip_cache_read else await self._cache.get_profile(slug)
         if cached is not None:
             progress(f"profile cache hit for /in/{slug}/")
             response = ProfileResponse.model_validate(cached)
@@ -99,6 +102,7 @@ class ProfileService:
                 request_id=request_id,
                 event="profile_fetch",
                 cached=True,
+                caller_session=False,
                 visibility=response.profile.visibility,
                 section_states=response.sections,
                 deadline_hit=False,
@@ -108,6 +112,28 @@ class ProfileService:
         if datetime.now(timezone.utc) >= deadline:
             raise UpstreamDeadlineError()
 
+        if request_cookies is not None:
+            progress(f"using request-scoped LinkedIn cookies for /in/{slug}/")
+        async with self._client.request_session(request_cookies):
+            return await self._fetch_live(
+                slug=slug,
+                request_id=request_id,
+                started=started,
+                deadline=deadline,
+                persist_cache=request_cookies is None,
+                caller_session=request_cookies is not None,
+            )
+
+    async def _fetch_live(
+        self,
+        *,
+        slug: str,
+        request_id: UUID,
+        started: datetime,
+        deadline: datetime,
+        persist_cache: bool,
+        caller_session: bool,
+    ) -> ProfileResponse:
         cached_identity = await self._cache.get_identity(slug)
         cached_urn = cached_identity.get("entity_urn") if cached_identity else None
         progress(f"profile cache miss for /in/{slug}/ cached_urn={bool(cached_urn)}")
@@ -167,12 +193,14 @@ class ProfileService:
             sections=sections,
             warnings=warnings,
         )
-        await self._cache.put_profile(slug, response.model_dump(mode="json"), profile.visibility)
+        if persist_cache:
+            await self._cache.put_profile(slug, response.model_dump(mode="json"), profile.visibility)
         log_event(
             logger,
             request_id=request_id,
             event="profile_fetch",
             cached=False,
+            caller_session=caller_session,
             visibility=profile.visibility,
             section_states=sections,
             deadline_hit=deadline_hit,

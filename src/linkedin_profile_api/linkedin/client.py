@@ -4,8 +4,10 @@ import asyncio
 import json
 import random
 import sys
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from datetime import datetime
-from typing import Any
+from typing import Any, AsyncIterator
 from urllib.parse import urlencode, urljoin, urlparse
 
 from curl_cffi.requests import AsyncSession, RequestsError, Response
@@ -40,6 +42,7 @@ from linkedin_profile_api.linkedin.session import (
     OUTCOME_EXPIRED,
     OUTCOME_OK,
     OUTCOME_RATE_LIMITED,
+    CookiePair,
     SessionManager,
 )
 
@@ -52,6 +55,7 @@ DOCUMENT_ACCEPT = (
 )
 PROFILE_HTML_MAX_BYTES = 5_000_000
 _PROGRESS_ENABLED = True
+_request_pair: ContextVar[CookiePair | None] = ContextVar("linkedin_request_cookie_pair", default=None)
 
 
 def set_progress(enabled: bool) -> None:
@@ -132,6 +136,14 @@ class LinkedInClient:
     def reload_captured(self, captured: CapturedEndpoints) -> None:
         self._captured = captured
 
+    @asynccontextmanager
+    async def request_session(self, pair: CookiePair | None) -> AsyncIterator[None]:
+        token = _request_pair.set(pair)
+        try:
+            yield
+        finally:
+            _request_pair.reset(token)
+
     async def get_json(
         self,
         path: str,
@@ -150,10 +162,10 @@ class LinkedInClient:
         max_bytes: int | None = None,
     ) -> str:
         await self._pace()
-        self._sync_cookies()
         http = self._require()
         try:
             async with self._semaphore:
+                self._sync_cookies()
                 response = await http.get(
                     url,
                     headers=self._headers(),
@@ -180,10 +192,10 @@ class LinkedInClient:
     ) -> str:
         progress(f"GET HTML {url}")
         await self._pace()
-        self._sync_cookies()
         http = self._require()
         try:
             async with self._semaphore:
+                self._sync_cookies()
                 response = await http.get(
                     url,
                     headers=self._document_headers(),
@@ -341,20 +353,38 @@ class LinkedInClient:
             raise RuntimeError("LinkedIn HTTP session is not started.")
         return self._http
 
+    def _using_request_cookies(self) -> bool:
+        return _request_pair.get() is not None
+
+    def _current_pair(self) -> CookiePair | None:
+        override = _request_pair.get()
+        if override is not None:
+            return override
+        return self._sessions.active_pair()
+
+    def _cookie_bind_id(self) -> str | None:
+        pair = self._current_pair()
+        if pair is None:
+            return None
+        if self._using_request_cookies():
+            return f"request:{id(pair)}"
+        return pair.slot
+
     def _apply_cookies(self) -> None:
         http = self._require()
         http.cookies.clear()
-        for name, value in self._sessions.cookie_dict().items():
-            http.cookies.set(name, value, domain=COOKIE_DOMAIN, path="/", secure=True)
-        pair = self._sessions.active_pair()
-        self._bound_slot = pair.slot if pair else None
+        pair = self._current_pair()
+        if pair is not None:
+            for name, value in pair.cookies.items():
+                http.cookies.set(name, value, domain=COOKIE_DOMAIN, path="/", secure=True)
+        self._bound_slot = self._cookie_bind_id()
 
     def _sync_cookies(self) -> None:
-        if self._bound_slot != self._sessions.active_slot():
+        if self._bound_slot != self._cookie_bind_id():
             self._apply_cookies()
 
     def _headers(self, referer: str | None = None) -> dict[str, str]:
-        pair = self._sessions.active_pair()
+        pair = self._current_pair()
         csrf = pair.csrf_token if pair else ""
         headers = build_request_headers(csrf, self._captured)
         if referer:
@@ -389,13 +419,13 @@ class LinkedInClient:
     ) -> Response:
         if redirect_hops == 0 and not retried:
             await self._pace()
-        self._sync_cookies()
         http = self._require()
         url = path if path.startswith("https://") else urljoin(LINKEDIN_ORIGIN, path)
         if params:
             url = f"{url}?{urlencode(params)}"
         try:
             async with self._semaphore:
+                self._sync_cookies()
                 response = await http.request(
                     method,
                     url,
@@ -415,6 +445,16 @@ class LinkedInClient:
         progress(f"{method} {path} -> HTTP {response.status_code}")
         return response
 
+    async def _record_ok(self) -> None:
+        if self._using_request_cookies():
+            return
+        await self._sessions.mark_ok()
+
+    async def _record_failure(self, outcome: str) -> bool:
+        if self._using_request_cookies():
+            return False
+        return await self._sessions.mark_failure(outcome)
+
     async def _classify_status(self, response: Response) -> None:
         status = response.status_code
         content_type = (response.headers.get("content-type") or "").lower()
@@ -422,13 +462,13 @@ class LinkedInClient:
         html_expected_json = "html" in content_type or body.lstrip().startswith("<")
 
         if status == 999:
-            await self._sessions.mark_failure(OUTCOME_BLOCKED)
+            await self._record_failure(OUTCOME_BLOCKED)
             raise LinkedInBlockedError()
         if 300 <= status < 400:
             location = response.headers.get("location") or ""
             current = str(getattr(response, "url", "") or "")
             if location and _same_resource(current, location):
-                switched = await self._sessions.mark_failure(OUTCOME_EXPIRED)
+                switched = await self._record_failure(OUTCOME_EXPIRED)
                 if switched:
                     self._sync_cookies()
                     raise LinkedInSessionExpiredError(
@@ -439,7 +479,7 @@ class LinkedInClient:
                 raise LinkedInProtocolChangedError(
                     f"LinkedIn redirected (HTTP {status}) to {location or 'an empty location'}."
                 )
-            switched = await self._sessions.mark_failure(OUTCOME_EXPIRED)
+            switched = await self._record_failure(OUTCOME_EXPIRED)
             if switched:
                 self._sync_cookies()
                 raise LinkedInSessionExpiredError(
@@ -449,29 +489,29 @@ class LinkedInClient:
                 f"LinkedIn redirected the session (HTTP {status}) to {location or 'an empty location'}."
             )
         if status in {401, 403} or html_expected_json:
-            switched = await self._sessions.mark_failure(OUTCOME_EXPIRED)
+            switched = await self._record_failure(OUTCOME_EXPIRED)
             if switched:
                 self._sync_cookies()
                 raise LinkedInSessionExpiredError("Primary session failed; failover is now active.")
             raise LinkedInSessionExpiredError()
         if status == 429:
-            await self._sessions.mark_failure(OUTCOME_RATE_LIMITED)
+            await self._record_failure(OUTCOME_RATE_LIMITED)
             raise LinkedInRateLimitedError()
         if status == 404:
             raise ProfileNotFoundError()
         if status >= 400:
             raise LinkedInProtocolChangedError(f"LinkedIn returned HTTP {status}.")
-        await self._sessions.mark_ok()
+        await self._record_ok()
 
     async def _classify_document(self, response: Response) -> None:
         status = response.status_code
         final_url = str(getattr(response, "url", "") or "")
         location = response.headers.get("location") or final_url
         if status == 999:
-            await self._sessions.mark_failure(OUTCOME_BLOCKED)
+            await self._record_failure(OUTCOME_BLOCKED)
             raise LinkedInBlockedError()
         if _redirect_kind(location) == "auth" or _redirect_kind(final_url) == "auth":
-            switched = await self._sessions.mark_failure(OUTCOME_EXPIRED)
+            switched = await self._record_failure(OUTCOME_EXPIRED)
             if switched:
                 self._sync_cookies()
                 raise LinkedInSessionExpiredError(
@@ -482,14 +522,14 @@ class LinkedInClient:
             )
         if 300 <= status < 400:
             if location and _same_resource(final_url, location):
-                switched = await self._sessions.mark_failure(OUTCOME_EXPIRED)
+                switched = await self._record_failure(OUTCOME_EXPIRED)
                 if switched:
                     self._sync_cookies()
                     raise LinkedInSessionExpiredError(
                         "Primary session bounced (HTTP 302 to the same URL); failover is now active."
                     )
                 raise LinkedInSessionExpiredError()
-            switched = await self._sessions.mark_failure(OUTCOME_EXPIRED)
+            switched = await self._record_failure(OUTCOME_EXPIRED)
             if switched:
                 self._sync_cookies()
                 raise LinkedInSessionExpiredError(
@@ -499,19 +539,19 @@ class LinkedInClient:
                 f"LinkedIn redirected the session (HTTP {status}) to {location or 'an empty location'}."
             )
         if status in {401, 403}:
-            switched = await self._sessions.mark_failure(OUTCOME_EXPIRED)
+            switched = await self._record_failure(OUTCOME_EXPIRED)
             if switched:
                 self._sync_cookies()
                 raise LinkedInSessionExpiredError("Primary session failed; failover is now active.")
             raise LinkedInSessionExpiredError()
         if status == 429:
-            await self._sessions.mark_failure(OUTCOME_RATE_LIMITED)
+            await self._record_failure(OUTCOME_RATE_LIMITED)
             raise LinkedInRateLimitedError()
         if status == 404:
             raise ProfileNotFoundError()
         if status >= 400:
             raise LinkedInProtocolChangedError(f"LinkedIn returned HTTP {status} for a profile page.")
-        await self._sessions.mark_ok()
+        await self._record_ok()
 
     def _parse_json(self, response: Response, *, path: str = "") -> Any:
         text = self._strip_xssi(response.text or "")

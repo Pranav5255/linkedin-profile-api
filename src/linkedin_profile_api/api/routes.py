@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from typing import Annotated
 from uuid import uuid4
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Header, Request
 
 from linkedin_profile_api.dependencies import (
     CacheDep,
@@ -13,12 +14,38 @@ from linkedin_profile_api.dependencies import (
     SessionDep,
     SettingsDep,
 )
-from linkedin_profile_api.linkedin.exceptions import AppError, InvalidProfileUrlError
+from linkedin_profile_api.linkedin.exceptions import (
+    AppError,
+    InvalidLinkedInCookieError,
+    InvalidProfileUrlError,
+)
+from linkedin_profile_api.linkedin.session import CookiePair, pair_from_raw
 from linkedin_profile_api.linkedin.url import parse_profile_url
 from linkedin_profile_api.schemas.request import ProfileRequest
 from linkedin_profile_api.schemas.response import HealthResponse, ProfileResponse, ReadyResponse
 
 router = APIRouter()
+
+LinkedInCookieHeader = Annotated[
+    str | None,
+    Header(
+        alias="X-LinkedIn-Cookie",
+        description=(
+            "Optional full LinkedIn Cookie header for this request only. "
+            "Must include li_at and JSESSIONID. Not stored or logged."
+        ),
+    ),
+]
+
+
+def resolve_request_cookies(header: str | None, body: str | None) -> CookiePair | None:
+    raw = (header or "").strip() or (body or "").strip()
+    if not raw:
+        return None
+    pair = pair_from_raw(raw, slot="request")
+    if pair is None:
+        raise InvalidLinkedInCookieError()
+    return pair
 
 
 @router.get("/healthz", response_model=HealthResponse, tags=["support"])
@@ -54,13 +81,18 @@ async def create_profile(
     limiter: LimiterDep,
     service: ServiceDep,
     settings: SettingsDep,
+    x_linkedin_cookie: LinkedInCookieHeader = None,
 ) -> ProfileResponse:
     limiter.check(role)
     if len(payload.profile_url) > settings.max_url_length:
         raise InvalidProfileUrlError("Profile URL is empty or too long.")
     parse_profile_url(payload.profile_url, max_length=settings.max_url_length)
     request.state.request_id = getattr(request.state, "request_id", uuid4())
-    return await service.fetch(payload.profile_url, request.state.request_id)
+    return await service.fetch(
+        payload.profile_url,
+        request.state.request_id,
+        request_cookies=resolve_request_cookies(x_linkedin_cookie, payload.linkedin_cookie),
+    )
 
 
 @router.get("/v1/profiles", response_model=ProfileResponse, tags=["profile"])
@@ -71,10 +103,15 @@ async def get_profile(
     limiter: LimiterDep,
     service: ServiceDep,
     settings: SettingsDep,
+    x_linkedin_cookie: LinkedInCookieHeader = None,
 ) -> ProfileResponse:
     limiter.check(role)
     if not url or len(url) > settings.max_url_length:
         raise InvalidProfileUrlError("Profile URL is empty or too long.")
     parse_profile_url(url, max_length=settings.max_url_length)
     request.state.request_id = getattr(request.state, "request_id", uuid4())
-    return await service.fetch(url, request.state.request_id)
+    return await service.fetch(
+        url,
+        request.state.request_id,
+        request_cookies=resolve_request_cookies(x_linkedin_cookie, None),
+    )

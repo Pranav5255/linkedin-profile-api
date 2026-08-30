@@ -20,6 +20,12 @@ class InvalidProfileUrlError(AppError):
     message = "The profile URL is not an accepted LinkedIn /in/ URL."
 
 
+class InvalidLinkedInCookieError(AppError):
+    status_code = 422
+    code = "invalid_linkedin_cookie"
+    message = "The LinkedIn cookie value is missing li_at or JSESSIONID."
+
+
 class ProfileNotFoundError(AppError):
     status_code = 404
     code = "profile_not_found"
@@ -49,8 +55,9 @@ class LinkedInSessionExpiredError(AppError):
     code = "linkedin_session_expired"
     message = (
         "LinkedIn rejected the session. Copy a fresh Cookie header from the "
-        "browser tab that can open the profile, replace LINKEDIN_COOKIE_JAR, "
-        "and close that tab before retrying."
+        "browser tab that can open the profile, send it as X-LinkedIn-Cookie "
+        "(or replace LINKEDIN_COOKIE_JAR on the host), and close that tab "
+        "before retrying."
     )
 
 

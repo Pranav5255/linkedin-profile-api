@@ -42,7 +42,7 @@ class Settings(BaseSettings):
 
     evaluator_quota_per_hour: int = Field(default=60)
     demo_quota_per_hour: int = Field(default=5)
-    max_request_body_bytes: int = Field(default=8_192)
+    max_request_body_bytes: int = Field(default=32_768)
     max_url_length: int = Field(default=512)
 
 

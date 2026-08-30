@@ -16,8 +16,15 @@ OUTCOME_RATE_LIMITED = "rate_limited"
 COOKIE_DOMAIN = ".linkedin.com"
 
 
-def parse_cookie_jar(raw: str) -> dict[str, str]:
+def normalize_cookie_header(raw: str) -> str:
     text = raw.strip()
+    if text.lower().startswith("cookie:"):
+        return text.split(":", 1)[1].strip()
+    return text
+
+
+def parse_cookie_jar(raw: str) -> dict[str, str]:
+    text = normalize_cookie_header(raw)
     if not text:
         return {}
     if text.startswith("{"):
@@ -66,6 +73,23 @@ class CookiePair:
         return strip_jsessionid_quotes(self.jsessionid)
 
 
+def pair_from_raw(
+    raw: str,
+    *,
+    slot: str,
+    li_at: str = "",
+    jsessionid: str = "",
+) -> CookiePair | None:
+    cookies = _normalize_jsessionid(parse_cookie_jar(raw))
+    if li_at:
+        cookies["li_at"] = li_at
+    if jsessionid:
+        cookies["JSESSIONID"] = jsessionid
+    if not cookies.get("li_at") or not cookies.get("JSESSIONID"):
+        return None
+    return CookiePair(slot=slot, cookies=cookies)
+
+
 class SessionManager:
     def __init__(self, settings: Settings, cache: CacheStore) -> None:
         self._settings = settings
@@ -108,14 +132,7 @@ class SessionManager:
         )
 
     def _pair_from(self, slot: str, jar_raw: str, li_at: str, jsessionid: str) -> CookiePair | None:
-        cookies = _normalize_jsessionid(parse_cookie_jar(jar_raw))
-        if li_at:
-            cookies["li_at"] = li_at
-        if jsessionid:
-            cookies["JSESSIONID"] = jsessionid
-        if not cookies.get("li_at") or not cookies.get("JSESSIONID"):
-            return None
-        return CookiePair(slot=slot, cookies=cookies)
+        return pair_from_raw(jar_raw, slot=slot, li_at=li_at, jsessionid=jsessionid)
 
     async def mark_ok(self) -> None:
         pair = self.active_pair()

@@ -86,17 +86,35 @@ Never put cookies or keys in the README, image, or git history.
 
 All profile routes require `X-API-Key`. The header is registered as an OpenAPI security scheme so `/docs` → Authorize works.
 
+Hosted callers can send their own LinkedIn session instead of using the server jar. Prefer the header. Do not put cookies on the query string.
+
 ```http
 POST /v1/profiles
 X-API-Key: <key>
+X-LinkedIn-Cookie: li_at=...; JSESSIONID=ajax:...; bcookie=...; lidc=...; _px3=...
 Content-Type: application/json
 
 {"profile_url":"https://www.linkedin.com/in/example-profile/"}
 ```
 
+`X-LinkedIn-Cookie` must be the full Cookie header from a logged-in browser (same shape as `LINKEDIN_COOKIE_JAR`). `li_at` and `JSESSIONID` are required. A leading `Cookie:` prefix is stripped. The value is used for that request only: it is not written to disk, not logged, and not stored in the profile cache. Failed caller cookies do not fail over the host session.
+
+POST can send the same string in JSON instead of the header:
+
+```http
+POST /v1/profiles
+X-API-Key: <key>
+Content-Type: application/json
+
+{"profile_url":"https://www.linkedin.com/in/example-profile/","linkedin_cookie":"li_at=...; JSESSIONID=ajax:..."}
+```
+
+If both are present, the header wins. Omit both to use the host `LINKEDIN_COOKIE_JAR`.
+
 ```http
 GET /v1/profiles?url=https://www.linkedin.com/in/example-profile/
 X-API-Key: <key>
+X-LinkedIn-Cookie: li_at=...; JSESSIONID=ajax:...
 ```
 
 Accepted URLs: `https://linkedin.com/in/{slug}` and `https://www.linkedin.com/in/{slug}` only. Query and fragment are stripped. The service never fetches the user-supplied URL.
@@ -113,7 +131,7 @@ GET /openapi.json
 | Status | `error.code` |
 |---|---|
 | 401 | `invalid_api_key` |
-| 422 | `invalid_profile_url` |
+| 422 | `invalid_profile_url` or `invalid_linkedin_cookie` |
 | 404 | `profile_not_found` |
 | 429 | `local_rate_limited` or `linkedin_rate_limited` |
 | 502 | `linkedin_protocol_changed` |
@@ -146,13 +164,34 @@ linkedin-profile-api spike --url 'https://www.linkedin.com/in/your-first-degree-
 
 ## Reverse-engineering approach
 
-- Session cookies only. Prefer the full jar (`li_at`, `JSESSIONID`, `bcookie`, `lidc`, PerimeterX `_px3` / `_pxvid` / `pxcts`). `csrf-token` is `JSESSIONID` with quotes stripped.
-- The HTTP client seeds the cookie jar once and keeps LinkedIn `Set-Cookie` updates (`lidc`, etc.).
-- `Accept: application/vnd.linkedin.normalized+json+2.1` plus `x-restli-protocol-version: 2.0.0`.
-- `x-li-track` / `x-li-lang` have browser-shaped defaults; a HAR import overrides them.
-- Identity: resolve `/in/{slug}` to `urn:li:fsd_profile:...` from the profile page HTML (cached afterwards), then `GET /voyager/api/identity/dash/profiles/{urn}` with `FullProfileWithEntities-93`. `FullProfile-76` is the browser top-card call and returns name/photo only; if it is tried first and has no Position/Education/Skill entities, the client continues to `-93`. `WebTopCardCore-16` is the last fallback. The current web app does not send `q=memberIdentity` with a vanity slug. Section GraphQL runs only when a captured `queryId` exists. The old `/identity/profiles/{id}/profileView` path returns 410.
+### What we tried
+
+We did not invent a new LinkedIn protocol. Public Voyager write-ups, older GitHub clients, and discussion threads all describe the same first hop: `GET /voyager/api/identity/dash/profiles?q=memberIdentity&memberIdentity={slug}`, then `/identity/profiles/{id}/profileView` or GraphQL cards. That is the architecture we started from.
+
+A live HAR from the current web app contradicted those write-ups:
+
+- The browser does not send `q=memberIdentity` with a vanity slug.
+- `/identity/profiles/{id}/profileView` returns 410.
+- The page HTML for `/in/{slug}/` already contains `urn:li:fsd_profile:ACo...`. The identity call is `GET /voyager/api/identity/dash/profiles/{urn}`.
+
+Decorations looked successful before they were useful. `FullProfile-76` is the top-card call: HTTP 200, name and photo, no Position / Education / Skill entities. Treating that as the profile payload produced empty sections. `FullProfileWithEntities-93` is the decoration that actually carries those entities. `WebTopCardCore-16` is only a last fallback. `memberIdentity` stays in the client only if the HTML has no URN.
+
+The rest of the public architecture still holds, so we kept it: full cookie jar (`li_at`, `JSESSIONID` as `csrf-token`, `bcookie`, `lidc`, PerimeterX cookies), `curl_cffi` Chrome TLS impersonation, `Accept: application/vnd.linkedin.normalized+json+2.1`, flat `included[]` with `*`-prefixed URN pointers, captured `decorationId` / `queryId`, and one-shot bundle rediscovery when a hash 400/500s.
+
+After HTTP was green, parsers were still wrong:
+
+- The first `Profile` in `included[]` is often a thin or unrelated entity. Prefer `data` and match `publicIdentifier` to the requested slug.
+- Collecting anything whose type contained `"Experience"` also picked up `VolunteerExperience`.
+- Company came through as a raw URN. Use `company.url` / `universalName`.
+- `/readyz` reporting session expiry was often challenge HTML, a 3xx, or a hung datacenter IP — not `li_at` TTL. Two cookies without PerimeterX cookies usually die within a minute.
+
+### What we ship
+
+- Full cookie jar, seeded once; keep LinkedIn `Set-Cookie` updates (`lidc`, etc.). `csrf-token` is `JSESSIONID` with quotes stripped.
+- `Accept: application/vnd.linkedin.normalized+json+2.1` and `x-restli-protocol-version: 2.0.0`. `x-li-track` / `x-li-lang` default to browser-shaped values; a HAR import overrides them.
+- Identity: HTML `/in/{slug}/` → cached `urn:li:fsd_profile:...` → `GET /voyager/api/identity/dash/profiles/{urn}` with `FullProfileWithEntities-93`, then `-76`, then `WebTopCardCore-16`. Section GraphQL runs only when a captured `queryId` exists.
 - Normalized JSON is a flat `included[]` graph. `*`-prefixed keys are URN pointers. Resolution is separate from field extraction, with a cycle guard and depth limit.
-- `queryId` hashes rotate with LinkedIn web bundles. On operation-specific 400/500 the client invalidates once, scrapes allowlisted `*.licdn.com` JS assets, and rediscovers once. Discovery is skipped when the request deadline is close.
+- On operation-specific 400/500, invalidate the `queryId` once, scrape allowlisted `*.licdn.com` JS assets, and rediscover once. Skip discovery when the request deadline is close.
 
 ## Cache and cookie rotation
 
@@ -174,7 +213,8 @@ Failover cookies switch once per process on session death. `/readyz` then report
 - Constant-time API key compare; evaluator vs demo quotas.
 - SSRF: only `/in/{slug}` hosts; bundle fetches limited to `https://*.licdn.com` with size and timeout caps.
 - No debug or raw-upstream endpoints.
-- Structured JSON logs: request id, status, duration, cache hit, section states, `deadline_hit`, visibility. Never cookies, keys, full profiles, or upstream bodies.
+- Structured JSON logs: request id, status, duration, cache hit, `caller_session`, section states, `deadline_hit`, visibility. Never cookies, keys, full profiles, or upstream bodies.
+- Request-scoped LinkedIn cookies stay in memory for that request. They are not cached and do not update host session state.
 
 ## HTTPS deploy
 
@@ -210,8 +250,8 @@ https://<hostname>/docs
 
 - Voyager `queryId` / `decorationId` values rotate without notice.
 - Out-of-network and privacy-restricted profiles return withheld fields (`LinkedIn Member`).
-- `li_at` expires or is challenged; use the rotation runbook. Two cookies alone usually die within a minute without PerimeterX cookies.
-- Datacenter IP reputation typically hangs instead of returning JSON. Use `LINKEDIN_EGRESS_PROXY` when that happens.
+- `li_at` expires or is challenged; use the rotation runbook or send a fresh `X-LinkedIn-Cookie`. Two cookies alone usually die within a minute without PerimeterX cookies.
+- Datacenter IP reputation typically hangs instead of returning JSON. Caller cookies still leave from the host IP. Use `LINKEDIN_EGRESS_PROXY` when that happens.
 - Image URLs expire.
 - Request deadline (360s) can return partial results with `deadline_hit: true`.
 - This project violates LinkedIn’s User Agreement if used against LinkedIn. Account risk is real.
