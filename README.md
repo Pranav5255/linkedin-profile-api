@@ -1,6 +1,8 @@
 # LinkedIn Profile API
 
-Anybody can set the API key they will use by opening [https://pranav-linkedin-api-tross.duckdns.org/docs](https://pranav-linkedin-api-tross.duckdns.org/docs), clicking **Authorize**, pasting `X-API-Key`, then **Authorize** → **Close**. Swagger keeps that value for **Try it out** on this browser. Use the current hosted key (the one you were sent, or a new one after the host rotates it). Change what you paste anytime; you do not need to edit this README.
+Hosted `X-API-Key`: `k7mQ2pR9vX4nL8wC1tY6jH3bF0sA5dE`
+
+Anybody can set that key by opening [https://pranav-linkedin-api-tross.duckdns.org/docs](https://pranav-linkedin-api-tross.duckdns.org/docs), clicking **Authorize**, pasting `X-API-Key`, then **Authorize** → **Close**. Swagger keeps that value for **Try it out** on this browser.
 
 Public HTTPS API that accepts a LinkedIn `/in/{slug}` profile URL and returns indented JSON. The backend talks to LinkedIn Voyager / GraphQL over HTTP with a browser-like TLS fingerprint. There is no browser, Playwright, Selenium, or Puppeteer in this project.
 
@@ -15,14 +17,12 @@ The host root is a one-page landing. The button opens `/docs` so you can set `X-
 
 ## Use the hosted API
 
-Copy and paste the commands. The only value a first-time caller must set is `PROFILE_URL` (a LinkedIn `/in/{slug}`). Put your current API key in `API_KEY` — use the key you were sent, or any new key after the host rotates it.
+Copy and paste the commands. The only value a first-time caller must set is `PROFILE_URL` (a LinkedIn `/in/{slug}`). The hosted key is already filled in.
 
-`API_KEY` is not a LinkedIn secret. Anyone with the current host key can use it. The operator can change the host key to any string at any time; callers then send that new value as `X-API-Key`. The key is not in this file.
-
-Interactive: open `/docs` → **Authorize** → paste your key → **Authorize** → **Close** → try `POST /v1/profiles`.
+Interactive: open `/docs` → **Authorize** → paste `k7mQ2pR9vX4nL8wC1tY6jH3bF0sA5dE` → **Authorize** → **Close** → try `POST /v1/profiles`.
 
 ```bash
-API_KEY='your-api-key'
+API_KEY='k7mQ2pR9vX4nL8wC1tY6jH3bF0sA5dE'
 PROFILE_URL='https://www.linkedin.com/in/YOUR-SLUG/'
 curl -sS -X POST https://pranav-linkedin-api-tross.duckdns.org/v1/profiles \
   -H "X-API-Key: ${API_KEY}" \
@@ -31,7 +31,7 @@ curl -sS -X POST https://pranav-linkedin-api-tross.duckdns.org/v1/profiles \
 ```
 
 ```bash
-API_KEY='your-api-key'
+API_KEY='k7mQ2pR9vX4nL8wC1tY6jH3bF0sA5dE'
 PROFILE_URL='https://www.linkedin.com/in/YOUR-SLUG/'
 curl -sS -G https://pranav-linkedin-api-tross.duckdns.org/v1/profiles \
   -H "X-API-Key: ${API_KEY}" \
@@ -136,16 +136,16 @@ See `.env.example`. All values are empty placeholders in git.
 | `DUCKDNS_HOSTNAME` | Public hostname for the Caddy site. Unused when nginx terminates TLS. |
 | `CAPTURED_ENDPOINTS_PATH` | Gitignored output of HAR import. |
 
-Never put cookies or keys in the README, image, or git history.
+Never put LinkedIn cookies in the README, image, or git history. The hosted tester API key is in this file on purpose.
 
 ## API
 
-All profile routes require `X-API-Key`. Set it to whatever the current hosted key is. Responses are indented JSON.
+All profile routes require `X-API-Key`. Hosted value: `k7mQ2pR9vX4nL8wC1tY6jH3bF0sA5dE`. Responses are indented JSON.
 
 Callers can send their own LinkedIn session instead of the host jar. Prefer the header. Do not put cookies on the query string.
 
 ```bash
-API_KEY='your-api-key'
+API_KEY='k7mQ2pR9vX4nL8wC1tY6jH3bF0sA5dE'
 PROFILE_URL='https://www.linkedin.com/in/YOUR-SLUG/'
 LINKEDIN_COOKIE='li_at=...; JSESSIONID=ajax:...'
 curl -sS -X POST https://pranav-linkedin-api-tross.duckdns.org/v1/profiles \
@@ -160,7 +160,7 @@ curl -sS -X POST https://pranav-linkedin-api-tross.duckdns.org/v1/profiles \
 POST can send the same string in JSON instead of the header:
 
 ```bash
-API_KEY='your-api-key'
+API_KEY='k7mQ2pR9vX4nL8wC1tY6jH3bF0sA5dE'
 PROFILE_URL='https://www.linkedin.com/in/YOUR-SLUG/'
 LINKEDIN_COOKIE='li_at=...; JSESSIONID=ajax:...'
 curl -sS -X POST https://pranav-linkedin-api-tross.duckdns.org/v1/profiles \
@@ -317,4 +317,4 @@ https://pranav-linkedin-api-tross.duckdns.org/docs
 
 ## Secrets
 
-`.env`, `*.har`, and `data/captured-endpoints.json` are gitignored. You choose `API_KEY`; do not commit it. The hosted evaluator key is sent privately — not in this README.
+`.env`, `*.har`, and `data/captured-endpoints.json` are gitignored. Hosted tester `X-API-Key`: `k7mQ2pR9vX4nL8wC1tY6jH3bF0sA5dE`. LinkedIn cookies stay in `.env` only.
