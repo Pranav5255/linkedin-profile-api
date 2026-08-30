@@ -9,6 +9,8 @@ Source: https://github.com/Pranav5255/linkedin-profile-api
 Live: https://pranav-linkedin-api-tross.duckdns.org  
 Docs: https://pranav-linkedin-api-tross.duckdns.org/docs
 
+The host root is a one-page landing. The button opens `/docs` so you can set `X-API-Key`.
+
 ### This is a take-home implementation. LinkedIn’s User Agreement prohibits scraping, unauthorized automation, and reverse engineering. Using a personal `li_at` session can get the account restricted. Do not use a primary career account.
 
 ## Use the hosted API

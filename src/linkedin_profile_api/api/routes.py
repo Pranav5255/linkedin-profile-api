@@ -4,6 +4,9 @@ from typing import Annotated
 from uuid import uuid4
 
 from fastapi import APIRouter, Header, Request
+from fastapi.responses import HTMLResponse
+
+from linkedin_profile_api.api.landing import LANDING_HTML
 
 from linkedin_profile_api.dependencies import (
     CacheDep,
@@ -25,6 +28,12 @@ from linkedin_profile_api.schemas.request import ProfileRequest
 from linkedin_profile_api.schemas.response import HealthResponse, ProfileResponse, ReadyResponse
 
 router = APIRouter()
+
+
+@router.get("/", response_class=HTMLResponse, include_in_schema=False)
+async def landing() -> HTMLResponse:
+    return HTMLResponse(LANDING_HTML)
+
 
 LinkedInCookieHeader = Annotated[
     str | None,
