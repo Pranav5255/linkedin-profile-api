@@ -62,6 +62,16 @@ LANDING_HTML = """<!doctype html>
       outline: 2px solid var(--fg);
       outline-offset: 3px;
     }
+    a.docslink {
+      margin-top: 1.1rem;
+      color: var(--muted);
+      text-decoration: underline;
+      text-underline-offset: 0.18em;
+    }
+    a.docslink:focus-visible {
+      outline: 2px solid var(--fg);
+      outline-offset: 3px;
+    }
   </style>
 </head>
 <body>
@@ -69,6 +79,7 @@ LANDING_HTML = """<!doctype html>
     <h1>LinkedIn Profile API</h1>
     <p>Send a LinkedIn <code>/in/{slug}</code> URL. Get indented JSON back — name, experience, education, and the other public sections the session can see.</p>
     <a class="button" href="/docs">Set API key</a>
+    <a class="docslink" href="https://github.com/Pranav5255/linkedin-profile-api">Detailed instructions on GitHub</a>
   </main>
 </body>
 </html>
