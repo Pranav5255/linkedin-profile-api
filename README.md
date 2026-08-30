@@ -17,31 +17,31 @@ The hosted instance shares 80/443 with another site. nginx terminates TLS and pr
 flowchart TB
   client["Evaluator / curl / docs"]
   dns["DuckDNS"]
-  ip["Public IPv4"]
+  ipv4["Public IPv4"]
   nginx["nginx TLS :443 / :80"]
 
-  subgraph fastapi ["FastAPI  127.0.0.1:8080"]
+  subgraph fastapi ["FastAPI 127.0.0.1:8080"]
     auth["API key + rate limit"]
     slug["URL to slug  SSRF allowlist"]
     cookies["Request cookies XOR host jar"]
-    cache["SQLite WAL cache<br/>skipped if caller cookies"]
+    cache["SQLite WAL cache - skipped if caller cookies"]
   end
 
   subgraph voyager ["LinkedIn HTTP client"]
     tls["curl_cffi impersonate chrome124"]
     jar["Cookie jar + CSRF from JSESSIONID"]
     urn["HTML /in/slug to fsd_profile URN"]
-    identity["GET dash/profiles/urn<br/>FullProfileWithEntities-93<br/>fallback -76 then WebTopCard-16"]
-    graph["Normalized JSON URN graph"]
+    identity["GET dash/profiles/urn - FullProfileWithEntities-93 - fallback -76 then WebTopCard-16"]
+    norm["Normalized JSON URN graph"]
     parse["Section parsers + visibility"]
     rediscover["Optional queryId rediscovery"]
   end
 
   linkedin["LinkedIn Voyager / GraphQL"]
 
-  client -->|"HTTPS  X-API-Key<br/>optional X-LinkedIn-Cookie"| dns
-  dns --> ip
-  ip --> nginx
+  client -->|"HTTPS  X-API-Key + optional X-LinkedIn-Cookie"| dns
+  dns --> ipv4
+  ipv4 --> nginx
   nginx --> auth
   auth --> slug
   slug --> cookies
@@ -50,8 +50,8 @@ flowchart TB
   tls --> jar
   jar --> urn
   urn --> identity
-  identity --> graph
-  graph --> parse
+  identity --> norm
+  norm --> parse
   parse --> rediscover
   rediscover -->|"optional LINKEDIN_EGRESS_PROXY"| linkedin
 ```
