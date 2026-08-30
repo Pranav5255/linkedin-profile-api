@@ -1,11 +1,12 @@
 .env
 .env.*
 !.env.example
+PLAN.md
 
 *.db
 *.db-wal
 *.db-shm
-data/
+data/*
 !data/.gitkeep
 
 .venv/

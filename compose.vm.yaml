@@ -1,0 +1,31 @@
+# API-only stack for a VM that already has nginx on 80/443.
+# Do not start the Caddy service from compose.yaml on that host.
+#
+#   docker compose -f compose.vm.yaml up -d --build
+#
+# Bind only on loopback :8080 so this does not take host port 8000.
+
+services:
+  api:
+    build: .
+    image: linkedin-profile-api:local
+    env_file:
+      - path: .env
+        required: true
+    environment:
+      CACHE_DATABASE_PATH: /data/cache.db
+      CAPTURED_ENDPOINTS_PATH: /data/captured-endpoints.json
+    volumes:
+      - profile_cache:/data
+    ports:
+      - "127.0.0.1:8080:8000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  profile_cache:

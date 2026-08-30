@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "imported_at": "2026-08-30T00:00:00Z",
+  "source_har": "redacted-sample.har",
+  "headers": {
+    "x-li-lang": "en_US",
+    "x-li-track": "{\"clientVersion\":\"1.13.46267\",\"mpVersion\":\"1.13.46267\",\"osName\":\"web\",\"timezoneOffset\":5.5,\"timezone\":\"Asia/Calcutta\",\"deviceFormFactor\":\"DESKTOP\",\"mpName\":\"voyager-web\",\"displayDensity\":2}",
+    "x-li-page-instance": "urn:li:page:d_flagship3_profile_view_base;redacted",
+    "x-li-deco-include-micro-schema": "true",
+    "referer": "https://www.linkedin.com/in/example-profile/"
+  },
+  "operations": {
+    "identity": {
+      "method": "GET",
+      "path": "/voyager/api/identity/dash/profiles",
+      "query": {
+        "decorationId": "com.linkedin.voyager.dash.deco.identity.profile.FullProfileWithEntities-93"
+      },
+      "query_id": null,
+      "decoration_id": "com.linkedin.voyager.dash.deco.identity.profile.FullProfileWithEntities-93"
+    },
+    "experience": {
+      "method": "GET",
+      "path": "/voyager/api/graphql",
+      "query": {},
+      "query_id": "voyagerIdentityDashProfileComponents.00000000000000000000000000000000",
+      "decoration_id": null
+    }
+  }
+}
