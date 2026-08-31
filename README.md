@@ -55,6 +55,178 @@ curl -sS https://pranav-linkedin-api-tross.duckdns.org/healthz
 
 Use a 1st- or 2nd-degree connection of the session that will fetch it. A random public URL often returns `visibility: out_of_network`.
 
+### Request
+
+`POST /v1/profiles` is the main call. Pass the key in a header. Pass the LinkedIn profile URL in the JSON body. The service does not fetch that URL; it parses `/in/{slug}` and calls LinkedIn itself.
+
+```http
+POST /v1/profiles HTTP/1.1
+Host: pranav-linkedin-api-tross.duckdns.org
+X-API-Key: k7mQ2pR9vX4nL8wC1tY6jH3bF0sA5dE
+Content-Type: application/json
+
+{"profile_url":"https://www.linkedin.com/in/statsleon/"}
+```
+
+Same call as curl (only change `PROFILE_URL`):
+
+```bash
+API_KEY='k7mQ2pR9vX4nL8wC1tY6jH3bF0sA5dE'
+PROFILE_URL='https://www.linkedin.com/in/statsleon/'
+curl -sS -X POST https://pranav-linkedin-api-tross.duckdns.org/v1/profiles \
+  -H "X-API-Key: ${API_KEY}" \
+  -H "Content-Type: application/json" \
+  --data-raw "{\"profile_url\":\"${PROFILE_URL}\"}"
+```
+
+Optional on the same request: `X-LinkedIn-Cookie` (or JSON `linkedin_cookie`) to use the caller’s LinkedIn session instead of the host jar.
+
+GET is the same contract with a query parameter instead of a body:
+
+```http
+GET /v1/profiles?url=https://www.linkedin.com/in/statsleon/ HTTP/1.1
+Host: pranav-linkedin-api-tross.duckdns.org
+X-API-Key: k7mQ2pR9vX4nL8wC1tY6jH3bF0sA5dE
+```
+
+### Response
+
+HTTP 200. Indented JSON. Envelope fields, then `profile`, then per-section states.
+
+A live `statsleon` fetch looks like this (arrays shortened):
+
+```json
+{
+  "request_id": "13e13521-1e98-4b68-bed9-28142b840d19",
+  "fetched_at": "2026-08-31T04:46:27.941615Z",
+  "cached": false,
+  "deadline_hit": false,
+  "profile": {
+    "public_identifier": "statsleon",
+    "profile_url": "https://www.linkedin.com/in/statsleon/",
+    "visibility": "full",
+    "first_name": "Yu Chen",
+    "last_name": "Lai",
+    "full_name": "Yu Chen Lai",
+    "headline": "Data Scientist | MS Analytics @ Georgia Tech | A/B Experimentation · Anomaly Monitoring · Product Analytics",
+    "location": "Taiwan, Taiwan",
+    "industry": "Information Technology & Services",
+    "about": "Analytics practitioner with 9 years turning behavioral and transactional data into product, revenue, and operational decisions. ...",
+    "profile_images": [
+      {
+        "url": "https://media.licdn.com/dms/image/v2/...",
+        "width": null,
+        "height": null,
+        "category": "profile"
+      }
+    ],
+    "background_image": {
+      "url": "https://media.licdn.com/dms/image/v2/...",
+      "width": null,
+      "height": null,
+      "category": "background"
+    },
+    "experience": [
+      {
+        "title": "Chief Executive Officer",
+        "company": "Photon Future",
+        "company_id": "urn:li:fsd_company:105278584",
+        "company_url": "https://www.linkedin.com/company/phofuture/",
+        "employment_type": null,
+        "location": null,
+        "start_date": "2022-11",
+        "end_date": "2025-03",
+        "current": false,
+        "duration": null,
+        "description": "• Led a 40+ person cross-functional organization ...",
+        "logo": "https://media.licdn.com/dms/image/v2/..."
+      }
+    ],
+    "education": [
+      {
+        "school": "Georgia Institute of Technology",
+        "degree": "Master of Science in Analytics",
+        "field": null,
+        "start_date": "2026-07",
+        "end_date": "2028-08",
+        "grade": null,
+        "activities": null,
+        "description": "Focus: Data Science, Machine Learning",
+        "logo": null
+      }
+    ],
+    "skills": [
+      {"name": "Python", "endorsement_count": null, "related_experience": []},
+      {"name": "SQL", "endorsement_count": null, "related_experience": []}
+    ],
+    "certifications": [
+      {
+        "name": "AWS Certified AI Practitioner",
+        "issuer": "Amazon Web Services (AWS)",
+        "issued": null,
+        "expires": null,
+        "credential_id": null,
+        "credential_url": "https://www.credly.com/badges/...",
+        "logo": null
+      }
+    ],
+    "languages": [
+      {"language": "English", "proficiency": "Professional working"},
+      {"language": "Chinese (Traditional)", "proficiency": "Native or bilingual"}
+    ],
+    "volunteering": [
+      {
+        "role": "Math teacher",
+        "organization": "library",
+        "cause": null,
+        "start_date": "2015-09",
+        "end_date": "2017-06",
+        "description": "Volunteer math tutoring for underprivileged students on weekends..."
+      }
+    ],
+    "projects": [
+      {
+        "name": "Customer Churn Prediction | Kaggle Top 10% Portfolio Project",
+        "description": "Built a customer churn prediction portfolio project...",
+        "start_date": "2026-03",
+        "end_date": "2026-04",
+        "url": null
+      }
+    ],
+    "publications": [],
+    "honors": []
+  },
+  "sections": {
+    "images": "available",
+    "about": "available",
+    "experience": "available",
+    "education": "available",
+    "skills": "available",
+    "certifications": "available",
+    "languages": "available",
+    "volunteering": "available",
+    "projects": "available",
+    "publications": "empty",
+    "honors": "empty"
+  },
+  "warnings": []
+}
+```
+
+A second call for the same URL with the host jar usually returns `"cached": true` until `CACHE_TTL_SECONDS`.
+
+Failed calls stay in this envelope:
+
+```json
+{
+  "error": {
+    "code": "invalid_api_key",
+    "message": "Missing or invalid API key.",
+    "request_id": "00000000-0000-0000-0000-000000000000"
+  }
+}
+```
+
 To rotate the hosted key, set `API_KEY` in the host `.env` to any string, recreate the API container, and use the new value in Authorize / `X-API-Key`. No other command changes.
 
 ## Architecture
