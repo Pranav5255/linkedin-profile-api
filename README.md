@@ -21,6 +21,7 @@ The host root is a one-page landing. The button opens `/docs` so you can set `X-
   export LINKEDIN_COOKIE_JAR='<your-value-here>'
   curl -sS -X POST https://pranav-linkedin-api-tross.duckdns.org/v1/profiles \
     -H "X-API-Key: ${API_KEY}" \
+    -H "X-LinkedIn-Cookie: ${LINKEDIN_COOKIE_JAR}" \
     -H "Content-Type: application/json" \
     --data-raw "{\"profile_url\":\"${PROFILE_URL}\"}"
   ```
