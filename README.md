@@ -13,7 +13,17 @@ Docs: https://pranav-linkedin-api-tross.duckdns.org/docs
 
 The host root is a one-page landing. The button opens `/docs` so you can set `X-API-Key`.
 
-### This is a take-home implementation. LinkedIn’s User Agreement prohibits scraping, unauthorized automation, and reverse engineering. Using a personal `li_at` session can get the account restricted. Do not use a primary career account.
+- ### This is a take-home implementation. LinkedIn’s User Agreement prohibits scraping, unauthorized automation, and reverse engineering. Using a personal `li_at` session can get the account restricted. Do not use a primary career account.
+
+- ### Also, if the api starts returning session expired errors, the users can put in their session cookie values. You just need to open LinkedIn -> Inspect -> Network -> Filters: voyager -> expand any one field and copy the value of "Cookie". 
+  ### Just before running the API, export the value of cookie:
+  ```
+  export LINKEDIN_COOKIE_JAR='<your-value-here>'
+  curl -sS -X POST https://pranav-linkedin-api-tross.duckdns.org/v1/profiles \
+    -H "X-API-Key: ${API_KEY}" \
+    -H "Content-Type: application/json" \
+    --data-raw "{\"profile_url\":\"${PROFILE_URL}\"}"
+  ```
 
 ## Use the hosted API
 
